@@ -1,5 +1,7 @@
+import org.apache.commons.lang3.StringUtils;
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.ss.util.WorkbookUtil;
+
 import java.beans.IntrospectionException;
 import java.beans.PropertyDescriptor;
 import java.io.Serializable;
@@ -35,7 +37,7 @@ public class SpreadSheetBender implements SpreadSheet {
 
     private <R extends Serializable> String getSheetName(Class<R> rClass) {
         SheetSetting sheetSetting = rClass.getAnnotation(SheetSetting.class);
-        return Objects.nonNull(sheetSetting) ? sheetSetting.sheetName() : rClass.getSimpleName();
+        return Objects.nonNull(sheetSetting) && StringUtils.isBlank(sheetSetting.sheetName()) ? sheetSetting.sheetName() : rClass.getSimpleName();
     }
 
     private <R extends Serializable> boolean getHeaderStatus(Class<R> rClass) {
@@ -45,13 +47,13 @@ public class SpreadSheetBender implements SpreadSheet {
 
     private <R extends Serializable> void fillHeaders(Workbook workbook, Sheet sheet, Row row, Class<R> rClass) {
 
-        Field[] declaredFields = rClass.getDeclaredFields();
+        Field[] declaredFields = Arrays.stream(rClass.getDeclaredFields())
+                .filter(this::ignoreField)
+                .toArray(Field[]::new);
         CellStyle headerCellStyle = createHeaderCellStyle(workbook, rClass);
         SheetSetting sheetSetting = rClass.getAnnotation(SheetSetting.class);
         for (int fieldNumber = 0, declaredFieldsLength = declaredFields.length; fieldNumber < declaredFieldsLength; fieldNumber++) {
             Field field = declaredFields[fieldNumber];
-            if (ignoreField(field))
-                continue;
             CellSetting cellSetting = field.getAnnotation(CellSetting.class);
             Cell cell;
             if (Objects.nonNull(cellSetting)) {
@@ -102,10 +104,9 @@ public class SpreadSheetBender implements SpreadSheet {
 
         SheetSetting sheetSetting = rClass.getAnnotation(SheetSetting.class);
         Font headerFont = workbook.createFont();
-        headerFont.setFontName("headerFont");
         if (Objects.nonNull(sheetSetting)) {
-            headerFont.setBold(sheetSetting.isBold());
-            headerFont.setItalic(sheetSetting.isItalic());
+            headerFont.setBold(sheetSetting.fontSetting().isBold());
+            headerFont.setItalic(sheetSetting.fontSetting().isItalic());
         } else {
             headerFont.setBold(true);
             headerFont.setItalic(false);
@@ -119,11 +120,11 @@ public class SpreadSheetBender implements SpreadSheet {
         CreationHelper createHelper = workbook.getCreationHelper();
         for (R item : rows) {
             Row row = sheet.createRow(rowNumber++);
-            Field[] declaredFields = item.getClass().getDeclaredFields();
+            Field[] declaredFields = Arrays.stream(item.getClass().getDeclaredFields())
+                    .filter(this::ignoreField)
+                    .toArray(Field[]::new);
             for (int fieldNumber = 0, declaredFieldsLength = declaredFields.length; fieldNumber < declaredFieldsLength; fieldNumber++) {
                 Field field = declaredFields[fieldNumber];
-                if (ignoreField(field))
-                    continue;
                 CellSetting cellSetting = field.getAnnotation(CellSetting.class);
                 Cell cell = Objects.nonNull(cellSetting)
                         ? row.createCell(cellSetting.cellNumber())
@@ -145,8 +146,8 @@ public class SpreadSheetBender implements SpreadSheet {
         cellStyle.setQuotePrefixed(false);
         cellStyle.setWrapText(false);
         if (Objects.nonNull(cellSetting)) {
-            cellStyle.setAlignment(HorizontalAlignment.GENERAL);
-            cellStyle.setVerticalAlignment(VerticalAlignment.JUSTIFY);
+            cellStyle.setAlignment(cellSetting.horizontalAlignment());
+            cellStyle.setVerticalAlignment(cellSetting.verticalAlignment());
             if( cellSetting.dataFormatIndex() >= 0 && cellSetting.dataFormatIndex() < BuiltinFormats.getAll().length )
                 cellStyle.setDataFormat(cellSetting.dataFormatIndex());
             else if (!cellSetting.dataFormatString().isEmpty() || !cellSetting.dataFormatString().isBlank())
@@ -164,7 +165,7 @@ public class SpreadSheetBender implements SpreadSheet {
     }
 
     private boolean ignoreField(Field field){
-        return field.getName().equalsIgnoreCase("serialVersionUID");
+        return  Objects.isNull(field) || Modifier.isStatic(field.getModifiers());
     }
 
     private short getDefaultDataFormat(Field field) {
@@ -184,8 +185,15 @@ public class SpreadSheetBender implements SpreadSheet {
         CellSetting cellSetting = field.getAnnotation(CellSetting.class);
 
         Font font = workbook.createFont();
-        font.setBold(false);
-        font.setItalic(false);
+        if(Objects.nonNull(cellSetting)){
+            font.setBold(cellSetting.fontSetting().isBold());
+            font.setItalic(cellSetting.fontSetting().isItalic());
+        }
+        else {
+            font.setBold(false);
+            font.setItalic(false);
+        }
+
         return font;
     }
 
@@ -309,11 +317,11 @@ public class SpreadSheetBender implements SpreadSheet {
 
             for (int fieldNumber = 0, declaredFieldsLength = declaredFields.length; fieldNumber < declaredFieldsLength; fieldNumber++) {
                 Field field = declaredFields[fieldNumber];
-                if (ignoreField(field))
-                    continue;
+                if (ignoreField(field)) continue;
                 CellSetting cellSetting = field.getAnnotation(CellSetting.class);
                 Cell cell = Objects.nonNull(cellSetting)
-                        ? row.getCell(cellSetting.cellNumber()) : row.getCell(fieldNumber);
+                        ? row.getCell(cellSetting.cellNumber())
+                        : row.getCell(fieldNumber);
                 setFieldValue(item, cell, field);
             }
 
@@ -376,7 +384,7 @@ public class SpreadSheetBender implements SpreadSheet {
         Sheet sheet;
 
         if( Objects.nonNull(sheetSetting)){
-            if(sheetSetting.sheetName().isEmpty() || sheetSetting.sheetName().isBlank())
+            if( StringUtils.isBlank(sheetSetting.sheetName()) )
                 sheet = workbook.getSheetAt(0);
             else
                 sheet = workbook.getSheet(sheetSetting.sheetName());

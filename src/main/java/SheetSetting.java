@@ -11,15 +11,13 @@ import java.lang.annotation.*;
 @Target(ElementType.TYPE)
 public @interface SheetSetting {
 
-    String sheetName() default "";
+    String sheetName();
 
     int defaultColumnWidth() default 0;
 
     boolean header() default false;
 
-    boolean isBold() default true;
-
-    boolean isItalic() default false;
+    FontSetting fontSetting();
 
     boolean isLock() default true;
 
